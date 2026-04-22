@@ -10,6 +10,8 @@ const exec = promisify(execCallback);
 const FREETOUSE_API_BASE = process.env.FREETOUSE_API_BASE || "https://api.freetouse.com/v3";
 const FREETOUSE_TRACK_SEARCH_PATH =
   process.env.FREETOUSE_TRACK_SEARCH_PATH || "/music/tracks/search";
+const FFMPEG_BIN = process.env.FFMPEG_BIN || "/usr/bin/ffmpeg";
+const FFPROBE_BIN = process.env.FFPROBE_BIN || "/usr/bin/ffprobe";
 
 export const runtime = "nodejs";
 
@@ -24,10 +26,28 @@ function shellEscape(str: string): string {
 }
 
 async function getMediaDuration(input: string) {
-  const command = `ffprobe -v error -show_entries format=duration -of csv=p=0 "${shellEscape(
+  const command = `"${shellEscape(
+    FFPROBE_BIN
+  )}" -v error -show_entries format=duration -of csv=p=0 "${shellEscape(
     input
   )}"`;
-  const { stdout } = await exec(command);
+
+  let stdout: string;
+
+  try {
+    ({ stdout } = await exec(command));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+
+    if (message.includes("not found")) {
+      throw new Error(
+        `ffprobe was not found. Set FFPROBE_BIN in your environment or install ffprobe. Current value: ${FFPROBE_BIN}`
+      );
+    }
+
+    throw error;
+  }
+
   const duration = Number.parseFloat(stdout.trim());
 
   if (!Number.isFinite(duration) || duration <= 0) {
@@ -224,7 +244,7 @@ export async function POST(req: NextRequest) {
     const concatFilter = `${videoFilters};${concatInputs}concat=n=${videos.length}:v=1:a=0[vout]`;
 
     const command = `
-      ffmpeg -y \
+      "${shellEscape(FFMPEG_BIN)}" -y \
       ${inputArgs} \
       -stream_loop -1 -i "${shellEscape(selectedTrack.audioUrl)}" \
       -filter_complex "${concatFilter};[${videos.length}:a]volume=0.15,atrim=duration=${totalDuration.toFixed(
@@ -240,7 +260,19 @@ export async function POST(req: NextRequest) {
       "${shellEscape(outputPath)}"
     `;
 
-    await exec(command);
+    try {
+      await exec(command);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+
+      if (message.includes("not found")) {
+        throw new Error(
+          `ffmpeg was not found. Set FFMPEG_BIN in your environment or install ffmpeg. Current value: ${FFMPEG_BIN}`
+        );
+      }
+
+      throw error;
+    }
 
     configureCloudinary();
 
