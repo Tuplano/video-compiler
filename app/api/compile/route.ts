@@ -131,7 +131,7 @@ function getFreeToUseArtistName(track: FreeToUseTrack) {
   return "Unknown artist";
 }
 
-async function getRandomFreeToUseTrack(tags?: string[]) {
+async function getMostPlayedFreeToUseTrack(tags?: string[]) {
   const query =
     Array.isArray(tags) && tags.length > 0
       ? tags.join(" ")
@@ -140,7 +140,7 @@ async function getRandomFreeToUseTrack(tags?: string[]) {
   const params = new URLSearchParams({
     query,
     limit: "20",
-    order: "random",
+    order: "plays",
     sort: "desc",
   });
 
@@ -176,7 +176,7 @@ async function getRandomFreeToUseTrack(tags?: string[]) {
     );
   }
 
-  const selectedTrack = tracks[Math.floor(Math.random() * tracks.length)];
+  const selectedTrack = tracks[0];
   const audioUrl = getFreeToUseAudioUrl(selectedTrack);
 
   if (!audioUrl) {
@@ -224,7 +224,7 @@ export async function POST(req: NextRequest) {
 
     outputPath = path.join(tempDir, outputFileName);
 
-    const selectedTrack = await getRandomFreeToUseTrack(musicTags);
+    const selectedTrack = await getMostPlayedFreeToUseTrack(musicTags);
     const clipDurations = await Promise.all(videos.map((url) => getMediaDuration(url)));
     const totalDuration = clipDurations.reduce((sum, duration) => sum + duration, 0);
 
