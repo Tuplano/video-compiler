@@ -131,6 +131,13 @@ function getFreeToUseArtistName(track: FreeToUseTrack) {
   return "Unknown artist";
 }
 
+function pickRandomTrackFromTopResults(tracks: FreeToUseTrack[], poolSize = 5) {
+  const selectionPool = tracks.slice(0, Math.min(poolSize, tracks.length));
+  const randomIndex = Math.floor(Math.random() * selectionPool.length);
+
+  return selectionPool[randomIndex];
+}
+
 async function getMostPlayedFreeToUseTrack(tags?: string[]) {
   const query =
     Array.isArray(tags) && tags.length > 0
@@ -176,7 +183,7 @@ async function getMostPlayedFreeToUseTrack(tags?: string[]) {
     );
   }
 
-  const selectedTrack = tracks[0];
+  const selectedTrack = pickRandomTrackFromTopResults(tracks);
   const audioUrl = getFreeToUseAudioUrl(selectedTrack);
 
   if (!audioUrl) {
