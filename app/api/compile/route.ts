@@ -12,6 +12,7 @@ const FREETOUSE_TRACK_SEARCH_PATH =
   process.env.FREETOUSE_TRACK_SEARCH_PATH || "/music/tracks/search";
 const FFMPEG_BIN = process.env.FFMPEG_BIN || "/usr/bin/ffmpeg";
 const FFPROBE_BIN = process.env.FFPROBE_BIN || "/usr/bin/ffprobe";
+let lastSelectedTrackId: string | null = null;
 
 export const runtime = "nodejs";
 
@@ -181,12 +182,18 @@ async function getRandomFreeToUseTrack(tags?: string[]) {
     );
   }
 
-  const selectedTrack = pickRandomTrack(tracks);
+  const nonRepeatingTracks = tracks.filter(
+    (track) => String(track.id) !== lastSelectedTrackId
+  );
+  const selectionPool = nonRepeatingTracks.length > 0 ? nonRepeatingTracks : tracks;
+  const selectedTrack = pickRandomTrack(selectionPool);
   const audioUrl = getFreeToUseAudioUrl(selectedTrack);
 
   if (!audioUrl) {
     throw new Error("Selected Free To Use track did not include an audio URL");
   }
+
+  lastSelectedTrackId = String(selectedTrack.id);
 
   return {
     id: String(selectedTrack.id),
