@@ -1,4 +1,5 @@
 import { exec as execCallback } from "child_process";
+import { randomInt } from "crypto";
 import { v2 as cloudinary } from "cloudinary";
 import fs from "fs";
 import os from "os";
@@ -12,7 +13,8 @@ const FREETOUSE_TRACK_SEARCH_PATH =
   process.env.FREETOUSE_TRACK_SEARCH_PATH || "/music/tracks/search";
 const FFMPEG_BIN = process.env.FFMPEG_BIN || "/usr/bin/ffmpeg";
 const FFPROBE_BIN = process.env.FFPROBE_BIN || "/usr/bin/ffprobe";
-let lastSelectedTrackId: string | null = null;
+const RECENT_TRACK_HISTORY_LIMIT = 8;
+const recentSelectedTrackIds: string[] = [];
 
 export const runtime = "nodejs";
 
@@ -133,21 +135,48 @@ function getFreeToUseArtistName(track: FreeToUseTrack) {
 }
 
 function pickRandomTrack(tracks: FreeToUseTrack[]) {
-  const randomIndex = Math.floor(Math.random() * tracks.length);
+  const randomIndex = randomInt(tracks.length);
 
   return tracks[randomIndex];
 }
 
-async function getRandomFreeToUseTrack(tags?: string[]) {
-  const query =
+function getTrackSearchQueries(tags?: string[]) {
+  const normalizedTags =
     Array.isArray(tags) && tags.length > 0
-      ? tags.join(" ")
-      : "chill cinematic soundtrack";
+      ? tags.map((tag) => tag.trim()).filter((tag) => tag.length > 0)
+      : [];
+  const joinedTags = normalizedTags.join(" ");
+  const defaults = ["chill cinematic soundtrack", "cinematic instrumental", "ambient background"];
+
+  const queries = normalizedTags.length > 0
+    ? [
+        joinedTags,
+        `${joinedTags} soundtrack`,
+        `${joinedTags} instrumental`,
+        `${joinedTags} background`,
+      ]
+    : defaults;
+
+  return Array.from(new Set(queries.map((query) => query.trim()).filter((query) => query.length > 0)));
+}
+
+function rememberSelectedTrack(trackId: string) {
+  recentSelectedTrackIds.push(trackId);
+
+  if (recentSelectedTrackIds.length > RECENT_TRACK_HISTORY_LIMIT) {
+    recentSelectedTrackIds.splice(0, recentSelectedTrackIds.length - RECENT_TRACK_HISTORY_LIMIT);
+  }
+}
+
+async function searchFreeToUseTracks(query: string) {
+  const requestNonce = `${Date.now()}-${randomInt(1_000_000_000)}`;
 
   const params = new URLSearchParams({
     query,
     limit: "20",
     order: "random",
+    nonce: requestNonce,
+    _: requestNonce,
   });
 
   const baseUrl = FREETOUSE_API_BASE.replace(/\/$/, "");
@@ -158,6 +187,10 @@ async function getRandomFreeToUseTrack(tags?: string[]) {
 
   const response = await fetch(requestUrl, {
     cache: "no-store",
+    headers: {
+      "cache-control": "no-cache, no-store, max-age=0",
+      pragma: "no-cache",
+    },
   });
 
   if (!response.ok) {
@@ -171,19 +204,35 @@ async function getRandomFreeToUseTrack(tags?: string[]) {
     message?: string;
   };
 
-  const rawTracks = data.data || data.results || [];
-  const tracks = rawTracks.filter((track) => Boolean(getFreeToUseAudioUrl(track)));
+  return {
+    tracks: (data.data || data.results || []).filter((track) => Boolean(getFreeToUseAudioUrl(track))),
+    message: data.message,
+  };
+}
+
+async function getRandomFreeToUseTrack(tags?: string[]) {
+  const queries = getTrackSearchQueries(tags);
+  const searchResults = await Promise.all(queries.map((query) => searchFreeToUseTracks(query)));
+  const rawTracks = searchResults.flatMap((result) => result.tracks);
+  const dedupedTracks = new Map<string, FreeToUseTrack>();
+
+  rawTracks.forEach((track) => {
+    dedupedTracks.set(String(track.id), track);
+  });
+
+  const tracks = Array.from(dedupedTracks.values());
 
   if (tracks.length === 0) {
     const sampleTrack = rawTracks[0] ? JSON.stringify(rawTracks[0]).slice(0, 500) : "none";
+    const firstMessage = searchResults.find((result) => result.message)?.message;
     throw new Error(
-      data.message ||
+      firstMessage ||
         `No playable Free To Use tracks found. Sample track: ${sampleTrack}`
     );
   }
 
   const nonRepeatingTracks = tracks.filter(
-    (track) => String(track.id) !== lastSelectedTrackId
+    (track) => !recentSelectedTrackIds.includes(String(track.id))
   );
   const selectionPool = nonRepeatingTracks.length > 0 ? nonRepeatingTracks : tracks;
   const selectedTrack = pickRandomTrack(selectionPool);
@@ -193,7 +242,7 @@ async function getRandomFreeToUseTrack(tags?: string[]) {
     throw new Error("Selected Free To Use track did not include an audio URL");
   }
 
-  lastSelectedTrackId = String(selectedTrack.id);
+  rememberSelectedTrack(String(selectedTrack.id));
 
   return {
     id: String(selectedTrack.id),
